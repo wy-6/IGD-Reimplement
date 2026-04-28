@@ -1,0 +1,15 @@
+torch
+transformers
+datasets
+accelerate
+evaluate
+scikit-learn
+numpy
+pandas
+tqdm
+pyyaml
+textattack
+sentence-transformers
+spacy
+nltk
+gensim
