@@ -27,6 +27,8 @@ def parse_args():
     p.add_argument("--device", type=str, default=None)
     p.add_argument("--attacks", nargs="+", default=["textfooler", "textbugger"], help="支持 textfooler | textbugger | bertattack")
     p.add_argument("--max_eval_samples", type=int, default=1000)
+    p.add_argument("--checkpoint_stage", type=str, choices=["baseline", "igd"], default="igd", help="加载 baseline 或 igd checkpoint")
+    p.add_argument("--eval_stage", type=str, choices=["baseline", "igd"], default=None, help="推理时使用 baseline 头或 igd 头；默认与 checkpoint_stage 一致")
     p.add_argument("--checkpoint_dir", type=str, default=None, help="显式指定要加载的 checkpoint 目录")
     p.add_argument("--checkpoint_name", type=str, default=None, help="显式指定要加载的 checkpoint 目录名，如 ckpt_20260424_203928")
     p.add_argument("--enable_defense_infer", action="store_true", help="启用随机 mask + IG-guided mask 的鲁棒推理")
@@ -49,14 +51,14 @@ def _resolve_eval_output_root(cfg) -> str:
     return os.path.join(cfg["paths"]["output_dir"], dataset_name)
 
 
-def _resolve_igd_checkpoint_dir(cfg) -> Optional[str]:
+def _resolve_checkpoint_dir(cfg, stage: str) -> Optional[str]:
     dataset_name = cfg["dataset"]["name"]
     out_root = cfg["paths"]["output_dir"]
-    igd_stage = os.path.normpath(os.path.join(out_root, dataset_name, "igd"))
-    return resolve_latest_artifact_dir(igd_stage, remap_output_root=out_root)
+    stage_dir = os.path.normpath(os.path.join(out_root, dataset_name, stage))
+    return resolve_latest_artifact_dir(stage_dir, remap_output_root=out_root)
 
 
-def _resolve_manual_checkpoint_dir(cfg, checkpoint_dir: Optional[str], checkpoint_name: Optional[str]) -> Optional[str]:
+def _resolve_manual_checkpoint_dir(cfg, checkpoint_dir: Optional[str], checkpoint_name: Optional[str], stage: str) -> Optional[str]:
     dataset_name = cfg["dataset"]["name"]
     out_root = cfg["paths"]["output_dir"]
     if checkpoint_dir:
@@ -67,7 +69,7 @@ def _resolve_manual_checkpoint_dir(cfg, checkpoint_dir: Optional[str], checkpoin
         raise FileNotFoundError(f"指定的 checkpoint_dir 不存在模型文件：{checkpoint_dir}")
 
     if checkpoint_name:
-        norm_path = os.path.normpath(os.path.join(out_root, dataset_name, "igd", checkpoint_name))
+        norm_path = os.path.normpath(os.path.join(out_root, dataset_name, stage, checkpoint_name))
         ckpt_dir = remap_legacy_output_path(norm_path, out_root)
         ckpt = os.path.join(ckpt_dir, "pytorch_model.bin")
         if os.path.exists(ckpt):
@@ -126,20 +128,24 @@ def main():
     if args.guided_ig_steps is not None:
         infer_cfg["guided_ig_steps"] = int(args.guided_ig_steps)
 
+    eval_stage = args.eval_stage or args.checkpoint_stage
+    if bool(infer_cfg.get("enabled", False)) and eval_stage != "igd":
+        raise ValueError("鲁棒推理防御只支持 eval_stage=igd；baseline 评估请使用 --disable_defense_infer")
+
     set_seed(int(cfg.get("seed", 42)))
     device = resolve_device(args.device)
 
     loaded = load_dataset_and_tokenizer(cfg, max_train_samples=1, max_eval_samples=1)
     model = IGDModel(cfg, num_labels=loaded.num_labels)
 
-    igd_dir = _resolve_manual_checkpoint_dir(cfg, args.checkpoint_dir, args.checkpoint_name)
-    if igd_dir is None:
-        igd_dir = _resolve_igd_checkpoint_dir(cfg)
-    if igd_dir is None:
+    checkpoint_dir = _resolve_manual_checkpoint_dir(cfg, args.checkpoint_dir, args.checkpoint_name, args.checkpoint_stage)
+    if checkpoint_dir is None:
+        checkpoint_dir = _resolve_checkpoint_dir(cfg, args.checkpoint_stage)
+    if checkpoint_dir is None:
         raise FileNotFoundError(
-            "未找到 IGD checkpoint：请确认 paths.output_dir（或环境变量 IGD_OUTPUT_DIR）下是否存在对应数据集的 igd 模型"
+            f"未找到 {args.checkpoint_stage} checkpoint：请确认 paths.output_dir（或环境变量 IGD_OUTPUT_DIR）下是否存在对应数据集模型"
         )
-    ckpt = os.path.join(igd_dir, "pytorch_model.bin")
+    ckpt = os.path.join(checkpoint_dir, "pytorch_model.bin")
     sd = torch.load(ckpt, map_location="cpu")
     model.load_state_dict(sd, strict=False)
 
@@ -151,6 +157,7 @@ def main():
         max_eval_samples=args.max_eval_samples,
         query_budget=args.query_budget,
         eval_batch_size=args.eval_batch_size,
+        eval_stage=eval_stage,
         num_examples_offset=args.num_examples_offset,
     )
     run_ts = timestamp_now()
@@ -160,12 +167,13 @@ def main():
 
     attack_label = "_".join(_slugify(name) for name in args.attacks)
     out_path = os.path.join(out_dir, f"attack_summary_{attack_label}_{run_ts}.txt")
-    content = _render_attack_summary(cfg["dataset"]["name"], igd_dir, results)
+    content = _render_attack_summary(cfg["dataset"]["name"], checkpoint_dir, results)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(content)
     print(content, end="")
     print(f"saved: {out_path}")
-    print(f"loaded igd checkpoint: {igd_dir}")
+    print(f"loaded {args.checkpoint_stage} checkpoint: {checkpoint_dir}")
+    print(f"eval stage: {eval_stage}")
 
 
 if __name__ == "__main__":

@@ -56,6 +56,7 @@ class IGDTextAttackWrapper:
         max_length: int,
         cfg: Optional[Dict[str, Any]] = None,
         eval_batch_size: int = 4,
+        eval_stage: str = "igd",
     ):
         self.model = model
         self.tokenizer = tokenizer
@@ -63,11 +64,16 @@ class IGDTextAttackWrapper:
         self.max_length = int(max_length)
         self.cfg = cfg or {}
         self.eval_batch_size = max(1, int(eval_batch_size))
+        if eval_stage not in {"baseline", "igd"}:
+            raise ValueError(f"未知 eval_stage={eval_stage}，应为 baseline/igd")
+        self.eval_stage = eval_stage
         self.model.to(self.device)
         self.model.eval()
 
     def __call__(self, text_list: List[str]):
         infer_cfg = self.cfg.get("defense_infer", {}) or {}
+        if bool(infer_cfg.get("enabled", False)) and self.eval_stage != "igd":
+            raise ValueError("鲁棒推理防御只支持 eval_stage=igd；baseline 评估请关闭 defense_infer")
         if not bool(infer_cfg.get("enabled", False)):
             return self._predict_batch(text_list)
 
@@ -104,7 +110,7 @@ class IGDTextAttackWrapper:
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
                 token_type_ids=batch.get("token_type_ids"),
-                stage="igd",
+                stage=self.eval_stage,
             )
             logits_chunks.append(out.logits.detach().cpu())
         return torch.cat(logits_chunks, dim=0).numpy()
@@ -271,6 +277,7 @@ def run_attack_eval(
     max_eval_samples: Optional[int] = None,
     query_budget: Optional[int] = None,
     eval_batch_size: int = 4,
+    eval_stage: str = "igd",
     num_examples_offset: int = 0,
 ) -> Dict[str, Any]:
     import datasets
@@ -296,6 +303,7 @@ def run_attack_eval(
         max_length=int(cfg["dataset"].get("max_length", 128)),
         cfg=cfg,
         eval_batch_size=eval_batch_size,
+        eval_stage=eval_stage,
     )
     wrapper = as_textattack_model_wrapper(wrapper)
 
