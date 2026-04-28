@@ -48,12 +48,21 @@ class IGDTextAttackWrapper:
     推理按技术路线：不提供 pseudo_*，由模型内部用 0 填充 v'。
     """
 
-    def __init__(self, model, tokenizer, device: torch.device, max_length: int, cfg: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        model,
+        tokenizer,
+        device: torch.device,
+        max_length: int,
+        cfg: Optional[Dict[str, Any]] = None,
+        eval_batch_size: int = 4,
+    ):
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
         self.max_length = int(max_length)
         self.cfg = cfg or {}
+        self.eval_batch_size = max(1, int(eval_batch_size))
         self.model.to(self.device)
         self.model.eval()
 
@@ -80,21 +89,25 @@ class IGDTextAttackWrapper:
     def _predict_batch(self, text_list: List[str]):
         if not text_list:
             return []
-        enc = self.tokenizer(
-            text_list,
-            truncation=True,
-            max_length=self.max_length,
-            padding=True,
-            return_tensors="pt",
-        )
-        batch = {k: v.to(self.device) for k, v in enc.items()}
-        out = self.model(
-            input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
-            token_type_ids=batch.get("token_type_ids"),
-            stage="igd",
-        )
-        return out.logits.detach().cpu().numpy()
+        logits_chunks: List[torch.Tensor] = []
+        for start in range(0, len(text_list), self.eval_batch_size):
+            chunk = text_list[start : start + self.eval_batch_size]
+            enc = self.tokenizer(
+                chunk,
+                truncation=True,
+                max_length=self.max_length,
+                padding=True,
+                return_tensors="pt",
+            )
+            batch = {k: v.to(self.device) for k, v in enc.items()}
+            out = self.model(
+                input_ids=batch["input_ids"],
+                attention_mask=batch["attention_mask"],
+                token_type_ids=batch.get("token_type_ids"),
+                stage="igd",
+            )
+            logits_chunks.append(out.logits.detach().cpu())
+        return torch.cat(logits_chunks, dim=0).numpy()
 
 
 def _align_textattack_device(device: torch.device) -> None:
@@ -257,6 +270,7 @@ def run_attack_eval(
     attacks: List[str],
     max_eval_samples: Optional[int] = None,
     query_budget: Optional[int] = None,
+    eval_batch_size: int = 4,
     num_examples_offset: int = 0,
 ) -> Dict[str, Any]:
     import datasets
@@ -281,6 +295,7 @@ def run_attack_eval(
         device=device,
         max_length=int(cfg["dataset"].get("max_length", 128)),
         cfg=cfg,
+        eval_batch_size=eval_batch_size,
     )
     wrapper = as_textattack_model_wrapper(wrapper)
 

@@ -35,6 +35,7 @@ def parse_args():
     p.add_argument("--stability_margin", type=float, default=None, help="覆盖 defense_infer.stability_margin")
     p.add_argument("--guided_ig_steps", type=int, default=None, help="覆盖 defense_infer.guided_ig_steps")
     p.add_argument("--query_budget", type=int, default=None, help="限制每条样本的最大查询次数，适合慢速攻击 smoke/补充实验")
+    p.add_argument("--eval_batch_size", type=int, default=4, help="模型评估时的分块 batch size；BERTAttack 显存紧张时可设为 1")
     p.add_argument("--num_examples_offset", type=int, default=0, help="从评估集偏移位置开始跑，便于分段续跑")
     return p.parse_args()
 
@@ -149,6 +150,7 @@ def main():
         attacks=args.attacks,
         max_eval_samples=args.max_eval_samples,
         query_budget=args.query_budget,
+        eval_batch_size=args.eval_batch_size,
         num_examples_offset=args.num_examples_offset,
     )
     run_ts = timestamp_now()
