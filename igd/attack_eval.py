@@ -58,6 +58,10 @@ class IGDTextAttackWrapper:
         self.model.eval()
 
     def __call__(self, text_list: List[str]):
+        infer_cfg = self.cfg.get("defense_infer", {}) or {}
+        if not bool(infer_cfg.get("enabled", False)):
+            return self._predict_batch(text_list)
+
         logits_list: List[torch.Tensor] = []
         for text in text_list:
             logits = robust_predict_logits(
@@ -71,6 +75,26 @@ class IGDTextAttackWrapper:
         if not logits_list:
             return []
         return torch.stack(logits_list, dim=0).detach().cpu().numpy()
+
+    @torch.no_grad()
+    def _predict_batch(self, text_list: List[str]):
+        if not text_list:
+            return []
+        enc = self.tokenizer(
+            text_list,
+            truncation=True,
+            max_length=self.max_length,
+            padding=True,
+            return_tensors="pt",
+        )
+        batch = {k: v.to(self.device) for k, v in enc.items()}
+        out = self.model(
+            input_ids=batch["input_ids"],
+            attention_mask=batch["attention_mask"],
+            token_type_ids=batch.get("token_type_ids"),
+            stage="igd",
+        )
+        return out.logits.detach().cpu().numpy()
 
 
 def _align_textattack_device(device: torch.device) -> None:
@@ -232,6 +256,8 @@ def run_attack_eval(
     device: torch.device,
     attacks: List[str],
     max_eval_samples: Optional[int] = None,
+    query_budget: Optional[int] = None,
+    num_examples_offset: int = 0,
 ) -> Dict[str, Any]:
     import datasets
     import textattack
@@ -258,7 +284,10 @@ def run_attack_eval(
     )
     wrapper = as_textattack_model_wrapper(wrapper)
 
+    num_examples_offset = max(0, int(num_examples_offset))
     dataset = [(ex[text_key], int(ex[label_key])) for ex in raw[split]]
+    if num_examples_offset:
+        dataset = dataset[num_examples_offset:]
     try:
         from textattack.datasets import Dataset as TA_Dataset
 
@@ -270,11 +299,23 @@ def run_attack_eval(
     results: Dict[str, Any] = {}
     for a in attacks:
         attack = build_attack(cfg, a, wrapper, device=device)
-        attacker = textattack.Attacker(attack, dataset, attack_args=textattack.AttackArgs(num_examples=len(dataset), disable_stdout=True))
+        num_examples = len(dataset)
+        attack_args_kwargs = {
+            "num_examples": num_examples,
+            "disable_stdout": True,
+        }
+        if query_budget is not None:
+            attack_args_kwargs["query_budget"] = int(query_budget)
+        try:
+            attack_args = textattack.AttackArgs(**attack_args_kwargs)
+        except TypeError:
+            # 兼容旧版 TextAttack：不支持 query_budget 时退回基础参数。
+            attack_args = textattack.AttackArgs(num_examples=num_examples, disable_stdout=True)
+        attacker = textattack.Attacker(attack, dataset, attack_args=attack_args)
         raw_results = attacker.attack_dataset()
 
         if not isinstance(raw_results, list):
             raw_results = list(raw_results)
-        results[a] = _summarize_attack_results(a, raw_results, total_examples=len(dataset))
+        results[a] = _summarize_attack_results(a, raw_results, total_examples=max(1, num_examples))
     return results
 

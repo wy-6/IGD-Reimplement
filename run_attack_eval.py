@@ -34,6 +34,8 @@ def parse_args():
     p.add_argument("--random_mask_trials", type=int, default=None, help="覆盖 defense_infer.random_mask_trials")
     p.add_argument("--stability_margin", type=float, default=None, help="覆盖 defense_infer.stability_margin")
     p.add_argument("--guided_ig_steps", type=int, default=None, help="覆盖 defense_infer.guided_ig_steps")
+    p.add_argument("--query_budget", type=int, default=None, help="限制每条样本的最大查询次数，适合慢速攻击 smoke/补充实验")
+    p.add_argument("--num_examples_offset", type=int, default=0, help="从评估集偏移位置开始跑，便于分段续跑")
     return p.parse_args()
 
 
@@ -146,6 +148,8 @@ def main():
         device=device,
         attacks=args.attacks,
         max_eval_samples=args.max_eval_samples,
+        query_budget=args.query_budget,
+        num_examples_offset=args.num_examples_offset,
     )
     run_ts = timestamp_now()
     output_root = _resolve_eval_output_root(cfg)
