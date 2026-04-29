@@ -185,9 +185,9 @@ def build_attack(cfg: Dict[str, Any], attack_name: str, model_wrapper, device: t
     # 在 Windows/无网络/TFHub 缓存异常时会直接失败；这里移除它，统一使用 sentence-transformers
     attack.constraints = [c for c in attack.constraints if c.__class__.__name__ != "UniversalSentenceEncoder"]
 
-    # baseline 用作普通 BERT 脆弱性对照时，TextFooler 不再叠加强语义约束和额外修改比例。
-    # 这样保留 recipe 自带的基础约束，避免 baseline 攻击被过度限制。
-    if eval_stage == "baseline" and attack_name == "textfooler":
+    # baseline 用作普通模型脆弱性对照时，不叠加 IGD 技术路线里的强约束。
+    # 后续新增攻击也会保留 TextAttack recipe 默认约束，避免 baseline 攻击被过度限制。
+    if eval_stage == "baseline":
         return attack
 
     # 约束对齐（尽量接近技术路线）
