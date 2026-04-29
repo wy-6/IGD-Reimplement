@@ -17,7 +17,7 @@ from igd.utils import resolve_device, resolve_latest_artifact_dir, set_seed
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=str, default="config.yaml")
-    p.add_argument("--stage", type=str, choices=["baseline", "igd"], required=True)
+    p.add_argument("--stage", type=str, choices=["baseline", "eval_baseline", "igd"], required=True)
     p.add_argument("--dataset", type=str, default=None, help="ag_news | imdb")
     p.add_argument("--device", type=str, default=None, help="cpu | cuda")
     p.add_argument("--max_train_samples", type=int, default=None)
@@ -40,7 +40,7 @@ def main():
 
     model = IGDModel(cfg, num_labels=loaded.num_labels)
 
-    if args.stage == "baseline":
+    if args.stage in {"baseline", "eval_baseline"}:
         saved_dir = train_baseline(
             cfg=cfg,
             model=model,
@@ -50,8 +50,9 @@ def main():
             data_collator=loaded.data_collator,
             device=device,
             max_length=int(cfg["dataset"].get("max_length", 128)),
+            checkpoint_stage=args.stage,
         )
-        print(f"saved baseline checkpoint: {saved_dir}")
+        print(f"saved {args.stage} checkpoint: {saved_dir}")
         return
 
     baseline_stage_dir = os.path.join(cfg["paths"]["output_dir"], cfg["dataset"]["name"], "baseline")

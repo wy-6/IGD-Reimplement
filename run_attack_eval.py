@@ -27,7 +27,13 @@ def parse_args():
     p.add_argument("--device", type=str, default=None)
     p.add_argument("--attacks", nargs="+", default=["textfooler", "textbugger"], help="支持 textfooler | textbugger | bertattack")
     p.add_argument("--max_eval_samples", type=int, default=1000)
-    p.add_argument("--checkpoint_stage", type=str, choices=["baseline", "igd"], default="igd", help="加载 baseline 或 igd checkpoint")
+    p.add_argument(
+        "--checkpoint_stage",
+        type=str,
+        choices=["baseline", "eval_baseline", "igd"],
+        default="igd",
+        help="加载 baseline、eval_baseline 或 igd checkpoint",
+    )
     p.add_argument("--eval_stage", type=str, choices=["baseline", "igd"], default=None, help="推理时使用 baseline 头或 igd 头；默认与 checkpoint_stage 一致")
     p.add_argument("--checkpoint_dir", type=str, default=None, help="显式指定要加载的 checkpoint 目录")
     p.add_argument("--checkpoint_name", type=str, default=None, help="显式指定要加载的 checkpoint 目录名，如 ckpt_20260424_203928")
@@ -128,7 +134,7 @@ def main():
     if args.guided_ig_steps is not None:
         infer_cfg["guided_ig_steps"] = int(args.guided_ig_steps)
 
-    eval_stage = args.eval_stage or args.checkpoint_stage
+    eval_stage = args.eval_stage or ("baseline" if args.checkpoint_stage == "eval_baseline" else args.checkpoint_stage)
     if bool(infer_cfg.get("enabled", False)) and eval_stage != "igd":
         raise ValueError("鲁棒推理防御只支持 eval_stage=igd；baseline 评估请使用 --disable_defense_infer")
 

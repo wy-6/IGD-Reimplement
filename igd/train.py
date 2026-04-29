@@ -101,10 +101,12 @@ def train_baseline(
     data_collator,
     device: torch.device,
     max_length: int,
+    checkpoint_stage: str = "baseline",
 ) -> str:
     model.train()
     batch_size = int(cfg["training"]["batch_size"])
-    epochs = int(cfg["training"].get("epochs_baseline", 1))
+    epoch_key = "epochs_eval_baseline" if checkpoint_stage == "eval_baseline" else "epochs_baseline"
+    epochs = int(cfg["training"].get(epoch_key, cfg["training"].get("epochs_baseline", 1)))
     lr = float(cfg["training"]["lr"])
     wd = float(cfg["training"].get("weight_decay", 0.01))
 
@@ -141,7 +143,7 @@ def train_baseline(
         metrics = evaluate(model, eval_loader, device, stage="baseline")
         tqdm.write(f"[baseline] ep{ep} eval acc={metrics['acc']:.4f} loss={metrics['loss']:.4f}")
 
-    return _save_checkpoint(cfg, model, tokenizer, stage="baseline", dataset_name=cfg["dataset"]["name"])
+    return _save_checkpoint(cfg, model, tokenizer, stage=checkpoint_stage, dataset_name=cfg["dataset"]["name"])
 
 
 def load_baseline_weights(model, baseline_dir: str) -> None:
