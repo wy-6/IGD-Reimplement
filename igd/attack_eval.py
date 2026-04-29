@@ -134,7 +134,7 @@ def _align_textattack_device(device: torch.device) -> None:
         pass
 
 
-def build_attack(cfg: Dict[str, Any], attack_name: str, model_wrapper, device: torch.device):
+def build_attack(cfg: Dict[str, Any], attack_name: str, model_wrapper, device: torch.device, eval_stage: str = "igd"):
     from textattack.attack_recipes import BERTAttackLi2020, TextBuggerLi2018, TextFoolerJin2019
     from textattack.constraints.overlap import MaxWordsPerturbed
     from sentence_transformers import SentenceTransformer
@@ -184,6 +184,11 @@ def build_attack(cfg: Dict[str, Any], attack_name: str, model_wrapper, device: t
     # 一些 TextAttack recipe 默认带 UniversalSentenceEncoder(TFHub) 语义约束，
     # 在 Windows/无网络/TFHub 缓存异常时会直接失败；这里移除它，统一使用 sentence-transformers
     attack.constraints = [c for c in attack.constraints if c.__class__.__name__ != "UniversalSentenceEncoder"]
+
+    # baseline 用作普通 BERT 脆弱性对照时，TextFooler 不再叠加强语义约束和额外修改比例。
+    # 这样保留 recipe 自带的基础约束，避免 baseline 攻击被过度限制。
+    if eval_stage == "baseline" and attack_name == "textfooler":
+        return attack
 
     # 约束对齐（尽量接近技术路线）
     max_ratio = _dataset_max_mod_ratio(cfg)
@@ -321,7 +326,7 @@ def run_attack_eval(
 
     results: Dict[str, Any] = {}
     for a in attacks:
-        attack = build_attack(cfg, a, wrapper, device=device)
+        attack = build_attack(cfg, a, wrapper, device=device, eval_stage=eval_stage)
         num_examples = len(dataset)
         attack_args_kwargs = {
             "num_examples": num_examples,
